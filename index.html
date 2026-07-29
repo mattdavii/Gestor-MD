@@ -290,8 +290,22 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:8000/api';
-        
+        const API_URL = `${window.location.origin}/api`;
+
+        let authToken = localStorage.getItem('gestor_md_token') || null;
+
+        // Envelopa fetch() adicionando o header Authorization automaticamente.
+        // Se o token expirar (401), desloga e volta pra tela de login.
+        async function authFetch(url, options = {}) {
+            options.headers = { ...(options.headers || {}), ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}) };
+            const res = await fetch(url, options);
+            if (res.status === 401) {
+                logout();
+                throw new Error('Sessão expirada');
+            }
+            return res;
+        }
+
         const formatMoeda = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
         const formatData = (d) => { if(!d) return "-"; const x = new Date(d); x.setMinutes(x.getMinutes() + x.getTimezoneOffset()); return isNaN(x.getTime()) ? d : x.toLocaleDateString('pt-BR'); };
         const getStrDate = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().split('T')[0]; };
@@ -365,6 +379,8 @@
                 const res = await fetch(`${API_URL}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: username.value, senha: password.value }) });
                 if (res.ok) {
                     const user = await res.json();
+                    authToken = user.token;
+                    localStorage.setItem('gestor_md_token', authToken);
                     document.getElementById('login-screen').classList.add('hidden');
                     
                     if(user.perfil === 'Admin') {
@@ -388,11 +404,11 @@
             } catch (err) { alert("Erro crítico: Servidor Backend Offline!"); }
         }
 
-        function logout() { location.reload(); }
+        function logout() { localStorage.removeItem('gestor_md_token'); authToken = null; location.reload(); }
 
         // --- RENDERIZAÇÃO DE DADOS (ADMIN VIEW) ---
         async function loadDashboard() {
-            const res = await fetch(`${API_URL}/dashboard${getQueryStringFiltro()}`); 
+            const res = await authFetch(`${API_URL}/dashboard${getQueryStringFiltro()}`); 
             const data = await res.json();
             document.getElementById('dash-in').innerText = formatMoeda(data.faturamento_global);
             document.getElementById('dash-out').innerText = formatMoeda(data.despesas_globais);
@@ -419,7 +435,7 @@
         }
 
         async function loadFinanceiro() {
-            const res = await fetch(`${API_URL}/financeiro${getQueryStringFiltro()}`); arrayFinanceiro = await res.json();
+            const res = await authFetch(`${API_URL}/financeiro${getQueryStringFiltro()}`); arrayFinanceiro = await res.json();
             document.getElementById('tb-financeiro').innerHTML = arrayFinanceiro.map(f => `
                 <tr class="hover:bg-slate-800 transition group border-b border-slate-700/50">
                     <td class="p-4 text-xs font-mono text-slate-500">${formatData(f.data_pagamento || f.data)}</td>
@@ -431,7 +447,7 @@
         }
 
         async function loadOS() {
-            const res = await fetch(`${API_URL}/os${getQueryStringFiltro()}`); arrayOS = await res.json();
+            const res = await authFetch(`${API_URL}/os${getQueryStringFiltro()}`); arrayOS = await res.json();
             document.getElementById('tb-os').innerHTML = arrayOS.map(o => `
                 <tr class="hover:bg-slate-800 transition border-b border-slate-700/50">
                     <td class="p-4 text-xs font-mono text-slate-500">${formatData(o.data)}</td>
@@ -447,7 +463,7 @@
         }
 
         async function loadEquipe() {
-            const res = await fetch(`${API_URL}/usuarios`); arrayUsuarios = await res.json();
+            const res = await authFetch(`${API_URL}/usuarios`); arrayUsuarios = await res.json();
             document.getElementById('tb-equipe').innerHTML = arrayUsuarios.map(u => `
                 <tr class="hover:bg-slate-800 transition border-b border-slate-700/50">
                     <td class="p-4 font-medium text-white">${u.nome}</td><td class="p-4 text-slate-400 font-mono text-xs">${u.usuario}</td>
@@ -457,7 +473,7 @@
         }
 
         async function carregarDropdownTecnicos() {
-            const res = await fetch(`${API_URL}/tecnicos`); const data = await res.json();
+            const res = await authFetch(`${API_URL}/tecnicos`); const data = await res.json();
             document.getElementById('os-tecnico').innerHTML = data.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
         }
 
@@ -473,27 +489,27 @@
         async function salvarFinanceiro(e) {
             e.preventDefault(); const id = document.getElementById('fin-id').value;
             const payload = { empresa: document.getElementById('fin-empresa').value, descricao: document.getElementById('fin-desc').value, valor: parseFloat(document.getElementById('fin-valor').value), tipo: document.getElementById('fin-tipo').value, categoria: document.getElementById('fin-categoria').value, status_pagamento: document.getElementById('fin-status-pgto').value, status_nf: document.getElementById('fin-status-nf').value, data_emissao: document.getElementById('fin-data-emissao').value || null, data_pagamento: document.getElementById('fin-data-pagamento').value || null };
-            await fetch(id ? `${API_URL}/financeiro/${id}` : `${API_URL}/financeiro`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            await authFetch(id ? `${API_URL}/financeiro/${id}` : `${API_URL}/financeiro`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
             fecharModal('modal-fin'); carregarDadosGlobais();
         }
 
         async function salvarOS(e) {
             e.preventDefault(); const id = document.getElementById('os-id').value;
             const payload = { empresa: document.getElementById('os-empresa').value, numero_os: document.getElementById('os-numero').value, cliente: document.getElementById('os-cliente').value, endereco: document.getElementById('os-endereco').value, plataforma: document.getElementById('os-plataforma').value, servico_descricao: document.getElementById('os-desc').value, relatorio_tecnico: document.getElementById('os-relatorio').value, id_tecnico: parseInt(document.getElementById('os-tecnico').value), data_programada: document.getElementById('os-data').value, status: document.getElementById('os-status').value || 'Pendente' };
-            const res = await fetch(id ? `${API_URL}/os/${id}` : `${API_URL}/os`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            const res = await authFetch(id ? `${API_URL}/os/${id}` : `${API_URL}/os`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
             const data = await res.json();
             const fileInput = document.getElementById('os-docs');
-            if (fileInput.files.length > 0) { const formData = new FormData(); for (let i = 0; i < fileInput.files.length; i++) formData.append("arquivos", fileInput.files[i]); await fetch(`${API_URL}/os/${id ? id : data.id}/documentos`, { method: 'POST', body: formData }); }
+            if (fileInput.files.length > 0) { const formData = new FormData(); for (let i = 0; i < fileInput.files.length; i++) formData.append("arquivos", fileInput.files[i]); await authFetch(`${API_URL}/os/${id ? id : data.id}/documentos`, { method: 'POST', body: formData }); }
             fecharModal('modal-os'); carregarDadosGlobais();
         }
 
         async function salvarUsuario(e) {
             e.preventDefault(); const id = document.getElementById('usr-id').value;
             const payload = { nome: document.getElementById('usr-nome').value, email: document.getElementById('usr-email').value, usuario: document.getElementById('usr-login').value, senha: document.getElementById('usr-senha').value, perfil: document.getElementById('usr-perfil').value };
-            try { const res = await fetch(id ? `${API_URL}/usuarios/${id}` : `${API_URL}/usuarios`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); if(!res.ok) throw new Error(); fecharModal('modal-user'); loadEquipe(); } catch(err) { alert("Erro ao criar/atualizar usuário."); }
+            try { const res = await authFetch(id ? `${API_URL}/usuarios/${id}` : `${API_URL}/usuarios`, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); if(!res.ok) throw new Error(); fecharModal('modal-user'); loadEquipe(); } catch(err) { alert("Erro ao criar/atualizar usuário."); }
         }
 
-        async function deletarItem(rota, id) { if(confirm("Deseja excluir este registro de forma permanente?")) { await fetch(`${API_URL}/${rota}/${id}`, { method: 'DELETE' }); if(rota === 'usuarios') loadEquipe(); else carregarDadosGlobais(); } }
+        async function deletarItem(rota, id) { if(confirm("Deseja excluir este registro de forma permanente?")) { await authFetch(`${API_URL}/${rota}/${id}`, { method: 'DELETE' }); if(rota === 'usuarios') loadEquipe(); else carregarDadosGlobais(); } }
 
         // ==========================================
         // LÓGICA DO TÉCNICO (AGENDA SEMANAL & PROGRESSIVE DISCLOSURE)
@@ -524,7 +540,7 @@
 
             document.getElementById('tech-week-label').innerText = `${techCurrentWeekStart.toLocaleDateString('pt-BR', {day:'2-digit', month:'short'})} a ${endWeek.toLocaleDateString('pt-BR', {day:'2-digit', month:'short'})}`;
 
-            const res = await fetch(`${API_URL}/minhas-os/${id_tecnico_logado}?inicio=${inicioStr}&fim=${fimStr}`); 
+            const res = await authFetch(`${API_URL}/minhas-os/${id_tecnico_logado}?inicio=${inicioStr}&fim=${fimStr}`); 
             const data = await res.json();
             
             const diasSemanaNomes = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
@@ -572,7 +588,7 @@
                 htmlCards += `<h3 class="text-xs font-black text-brand uppercase tracking-widest mt-6 mb-2 border-l-2 border-brand pl-2">${dataLabel}</h3>`;
 
                 for(let o of agrupado[diaOS]) {
-                    const resArq = await fetch(`${API_URL}/os/${o.id}/arquivos`); 
+                    const resArq = await authFetch(`${API_URL}/os/${o.id}/arquivos`); 
                     const arqData = await resArq.json();
                     
                     let docsHtml = '';
@@ -635,7 +651,7 @@
             const novoStatus = document.getElementById(`status-${id}`).value;
             const novoRelatorio = document.getElementById(`relatorio-${id}`).value;
             
-            await fetch(`${API_URL}/os/${id}/status`, { 
+            await authFetch(`${API_URL}/os/${id}/status`, { 
                 method: 'PUT', 
                 headers: {'Content-Type':'application/json'}, 
                 body: JSON.stringify({
@@ -653,7 +669,7 @@
             if(fileInput.files.length === 0) return alert("Selecione as fotos da galeria ou câmera primeiro!"); 
             const formData = new FormData(); 
             for(let i=0; i<fileInput.files.length; i++) formData.append("arquivos", fileInput.files[i]);
-            await fetch(`${API_URL}/os/${id}/evidencias`, { method: 'POST', body: formData }); 
+            await authFetch(`${API_URL}/os/${id}/evidencias`, { method: 'POST', body: formData }); 
             alert("Fotos enviadas com sucesso!"); fileInput.value = ""; 
         }
     </script>
